@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>AR with Persistent Model and Pinch Zoom</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  
+  <script src="js/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ar.js@2.2.2/aframe/build/aframe-ar.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/aframe-extras@6.1.1/dist/aframe-extras.min.js"></script>
+
+  <style>
+    .a-enter-vr { display: none !important; }
+    
+    .control-btn {
+      position: absolute;
+      z-index: 1000;
+      width: 60px;
+      height: 60px;
+      font-size: 32px;
+      background: rgba(0,0,0,0.6);
+      color: white;
+      border: 2px solid white;
+      border-radius: 50%;
+      cursor: pointer;
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: Arial, 'Segoe UI Symbol', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
+      transition: opacity 0.3s;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .control-btn:disabled {
+      opacity: 0.3;
+      pointer-events: none;
+    }
+    #resetBtn {
+      top: 20px;
+      left: 20px;
+      background: rgba(255, 0, 0, 0.6);
+      border-color: white;
+    }
+    #fullscreenBtn {
+      top: 20px;
+      right: 20px;
+    }
+    #rewindBtn {
+      left: 20px;
+      bottom: 30px;
+    }
+    #controlBtn {
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: 30px;
+    }
+    #forwardBtn {
+      right: 20px;
+      bottom: 30px;
+    }
+  </style>
+
+  <script>
+    AFRAME.registerComponent('persistent-anchor', {
+      init: function () {
+        this.marker = document.querySelector('#ar-marker');
+        this.markerFound = false;
+        this.el.object3D.visible = false;
+        this.animMixer = null;
+        this.pendingStart = false; // флаг, что маркер найден, но анимация ещё не готова
+        this.btn = document.getElementById('controlBtn');
+        this.rewindBtn = document.getElementById('rewindBtn');
+        this.forwardBtn = document.getElementById('forwardBtn');
+      },
+      tick: function () {
+        if (!this.marker) return;
+        if (!this.animMixer && this.el.components['animation-mixer']) {
+          this.animMixer = this.el.components['animation-mixer'];
+        }
+        const markerVisible = this.marker.object3D.visible;
+        if (markerVisible) {
+          this.el.object3D.position.copy(this.marker.object3D.position);
+          this.el.object3D.quaternion.copy(this.marker.object3D.quaternion);
+          if (!this.markerFound) {
+            this.markerFound = true;
+            this.el.object3D.visible = true;
+            if (this.btn) {
+              this.btn.disabled = false;
+              this.btn.textContent = '⏸';
+            }
+            if (this.rewindBtn) this.rewindBtn.disabled = false;
+            if (this.forwardBtn) this.forwardBtn.disabled = false;
+            
+            // Если анимация уже загружена, сбрасываем время и запускаем
+            if (this.animMixer) {
+              // Сбрасываем время на 0
+              if (this.animMixer.mixer) {
+                this.animMixer.mixer.setTime(0);
+              }
+              this.animMixer.play();
+            } else {
+              // Анимация ещё не загружена – ставим флаг, чтобы запустить позже
+              this.pendingStart = true;
+            }
+          }
+        }
+      },
+      reset: function () {
+        this.markerFound = false;
+        this.el.object3D.visible = false;
+        this.pendingStart = false; // сбрасываем флаг
+        if (this.btn) {
+          this.btn.disabled = true;
+          this.btn.textContent = '▶';
+        }
+        if (this.rewindBtn) this.rewindBtn.disabled = true;
+        if (this.forwardBtn) this.forwardBtn.disabled = true;
+      },
+      // Метод для запуска анимации после загрузки (вызывается извне)
+      startAfterLoad: function () {
+        if (this.pendingStart && this.animMixer) {
+          if (this.animMixer.mixer) {
+            this.animMixer.mixer.setTime(0);
+          }
+          this.animMixer.play();
+          this.pendingStart = false;
+        }
+      }
+    });
+  </script>
+</head>
+<body style="margin: 0; overflow: hidden;">
+  <button id="resetBtn" class="control-btn">✕</button>
+  <button id="fullscreenBtn" class="control-btn">⛶</button>
+  <button id="rewindBtn" class="control-btn" disabled>⏪</button>
+  <button id="controlBtn" class="control-btn" disabled>▶</button>
+  <button id="forwardBtn" class="control-btn" disabled>⏩</button>
+
+  <a-scene id="scene" embedded arjs="sourceType: webcam; debugUIEnabled: false;">
+    <a-marker id="ar-marker" type="pattern" url="my-marker.patt"></a-marker>
+    <a-entity id="model"
+              persistent-anchor
+              gltf-model="url(model.glb)"
+              animation-mixer="loop: once; clampWhenFinished: true"
+              scale="0.3 0.3 0.3">
+      <a-text value="Привет, мир!"
+              font="url(fonts/Roboto-Regular.ttf)"
+              color="gold"
+              align="center"
+              width="5"
+              side="double"
+              position="0 0.8 0"></a-text>
+    </a-entity>
+    <a-entity camera></a-entity>
+  </a-scene>
+
+  <script>
+    (function() {
+      const btn = document.getElementById('controlBtn');
+      const rewindBtn = document.getElementById('rewindBtn');
+      const forwardBtn = document.getElementById('forwardBtn');
+      const resetBtn = document.getElementById('resetBtn');
+      const model = document.getElementById('model');
+      const scene = document.getElementById('scene');
+      const fullscreenBtn = document.getElementById('fullscreenBtn');
+      const allButtons = document.querySelectorAll('.control-btn');
+
+      // ----- Fullscreen (кнопка) -----
+      function toggleFullscreen() {
+        const elem = document.documentElement;
+        if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.msFullscreenElement) {
+          if (elem.requestFullscreen) elem.requestFullscreen();
+          else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+          else if (elem.msRequestFullscreen) elem.msRequestFullscreen();
+        } else {
+          if (document.exitFullscreen) document.exitFullscreen();
+          else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+          else if (document.msExitFullscreen) document.msExitFullscreen();
+        }
+      }
+      fullscreenBtn.addEventListener('click', toggleFullscreen);
+
+      // ----- Pinch zoom -----
+      let initialDistance = null;
+      let initialScale = null;
+      function getDistance(touches) {
+        const dx = touches[0].clientX - touches[1].clientX;
+        const dy = touches[0].clientY - touches[1].clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+      }
+      scene.addEventListener('touchstart', (e) => {
+        if (btn.disabled) return;
+        if (e.touches.length === 2) {
+          e.preventDefault();
+          initialDistance = getDistance(e.touches);
+          const scale = model.getAttribute('scale');
+          initialScale = scale.x;
+        }
+      });
+      scene.addEventListener('touchmove', (e) => {
+        if (btn.disabled) return;
+        if (e.touches.length === 2 && initialDistance !== null) {
+          e.preventDefault();
+          const newDistance = getDistance(e.touches);
+          const ratio = newDistance / initialDistance;
+          const newScale = initialScale * ratio;
+          const clampedScale = Math.max(0.1, Math.min(3.0, newScale));
+          model.setAttribute('scale', `${clampedScale} ${clampedScale} ${clampedScale}`);
+        }
+      });
+      scene.addEventListener('touchend', (e) => {
+        if (e.touches.length < 2) {
+          initialDistance = null;
+          initialScale = null;
+        }
+      });
+
+      // ----- Управление анимацией -----
+      let animMixerComponent = null;
+      let threeMixer = null;
+
+      model.addEventListener('model-loaded', () => {
+        animMixerComponent = model.components['animation-mixer'];
+        if (!animMixerComponent) {
+          console.error('animation-mixer не найден');
+          return;
+        }
+        threeMixer = animMixerComponent.mixer;
+        if (!threeMixer) {
+          console.error('three.js mixer не найден');
+          return;
+        }
+
+        console.log('Модель загружена, анимация готова');
+
+        // Инициализация mixer (ставим время на 0, скорость 1), но НЕ запускаем анимацию
+        threeMixer.setTime(0);
+        threeMixer.timeScale = 1;
+
+        // Подписываемся на окончание анимации
+        threeMixer.addEventListener('finished', () => {
+          console.log('Анимация завершена, модель застыла на последнем кадре');
+          if (!btn.disabled) {
+            btn.textContent = '↻';
+          }
+        });
+
+        // Проверяем, не было ли уже обнаружение маркера до загрузки модели
+        const persistentComp = model.components['persistent-anchor'];
+        if (persistentComp && persistentComp.pendingStart) {
+          // Если да, запускаем анимацию с начала
+          threeMixer.setTime(0);
+          animMixerComponent.play();
+          persistentComp.pendingStart = false; // сбрасываем флаг
+        }
+
+        // Обновляем состояние кнопки, если модель уже активна (маркер был найден)
+        if (!btn.disabled) {
+          btn.textContent = '⏸';
+        }
+      });
+
+      btn.addEventListener('click', () => {
+        if (btn.disabled) return;
+        if (!animMixerComponent || !threeMixer) return;
+
+        if (btn.textContent === '⏸') {
+          animMixerComponent.pause();
+          btn.textContent = '▶';
+        } else if (btn.textContent === '▶') {
+          animMixerComponent.play();
+          btn.textContent = '⏸';
+        } else if (btn.textContent === '↻') {
+          threeMixer.timeScale = 1;
+          if (threeMixer._actions && threeMixer._actions.length > 0) {
+            const action = threeMixer._actions[0];
+            action.reset();
+            action.play();
+          } else {
+            threeMixer.setTime(0);
+            animMixerComponent.play();
+          }
+          btn.textContent = '⏸';
+        }
+      });
+
+      // ----- Кнопки перемотки (ускорение) -----
+      function setSpeed(speed) {
+        if (!threeMixer) return;
+        threeMixer.timeScale = speed;
+      }
+
+      forwardBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        if (forwardBtn.disabled || !threeMixer) return;
+        setSpeed(2);
+      });
+      forwardBtn.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        if (forwardBtn.disabled || !threeMixer) return;
+        setSpeed(1);
+      });
+      forwardBtn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        if (forwardBtn.disabled || !threeMixer) return;
+        setSpeed(2);
+      });
+      forwardBtn.addEventListener('mouseup', (e) => {
+        e.preventDefault();
+        if (forwardBtn.disabled || !threeMixer) return;
+        setSpeed(1);
+      });
+      forwardBtn.addEventListener('mouseleave', (e) => {
+        if (forwardBtn.disabled || !threeMixer) return;
+        setSpeed(1);
+      });
+
+      rewindBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        if (rewindBtn.disabled || !threeMixer) return;
+        setSpeed(-2);
+      });
+      rewindBtn.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        if (rewindBtn.disabled || !threeMixer) return;
+        setSpeed(1);
+      });
+      rewindBtn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        if (rewindBtn.disabled || !threeMixer) return;
+        setSpeed(-2);
+      });
+      rewindBtn.addEventListener('mouseup', (e) => {
+        e.preventDefault();
+        if (rewindBtn.disabled || !threeMixer) return;
+        setSpeed(1);
+      });
+      rewindBtn.addEventListener('mouseleave', (e) => {
+        if (rewindBtn.disabled || !threeMixer) return;
+        setSpeed(1);
+      });
+
+      window.addEventListener('blur', () => {
+        if (!threeMixer) return;
+        setSpeed(1);
+      });
+
+      // ----- Сброс (крестик) -----
+      resetBtn.addEventListener('click', () => {
+        const persistentComp = model.components['persistent-anchor'];
+        if (persistentComp) {
+          persistentComp.reset();
+        }
+        if (threeMixer) {
+          threeMixer.setTime(0);
+          threeMixer.timeScale = 1;
+          if (animMixerComponent) {
+            animMixerComponent.stop();
+          }
+        }
+        console.log('Приложение сброшено');
+      });
+
+      // ----- Скрытие/показ интерфейса двойным нажатием -----
+      let tapCount = 0;
+      let tapTimer = null;
+      const HIDE_DELAY = 500;
+
+      function resetTapCount() {
+        tapCount = 0;
+        if (tapTimer) {
+          clearTimeout(tapTimer);
+          tapTimer = null;
+        }
+      }
+
+      function toggleInterface() {
+        const anyVisible = allButtons[0]?.style.display !== 'none';
+        const newDisplay = anyVisible ? 'none' : 'flex';
+        allButtons.forEach(btn => btn.style.display = newDisplay);
+      }
+
+      scene.addEventListener('touchstart', (e) => {
+        if (e.touches.length > 1) {
+          resetTapCount();
+          return;
+        }
+
+        tapCount++;
+        if (tapTimer) clearTimeout(tapTimer);
+        tapTimer = setTimeout(resetTapCount, HIDE_DELAY);
+
+        if (tapCount === 2) {
+          e.preventDefault();
+          tapCount = 0;
+          clearTimeout(tapTimer);
+          tapTimer = null;
+          toggleInterface();
+        }
+      }, { passive: false });
+
+      // ----- Swipe gestures for fullscreen -----
+      let swipeStartY = null;
+      let swipeStartTime = null;
+      const SWIPE_THRESHOLD = 50;
+      const SWIPE_TIME_LIMIT = 500;
+
+      function isFullscreen() {
+        return !!(document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement);
+      }
+
+      function enterFullscreen() {
+        const elem = document.documentElement;
+        if (elem.requestFullscreen) elem.requestFullscreen();
+        else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+        else if (elem.msRequestFullscreen) elem.msRequestFullscreen();
+      }
+
+      function exitFullscreen() {
+        if (document.exitFullscreen) document.exitFullscreen();
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        else if (document.msExitFullscreen) document.msExitFullscreen();
+      }
+
+      scene.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1) {
+          swipeStartY = null;
+          return;
+        }
+        swipeStartY = e.touches[0].clientY;
+        swipeStartTime = Date.now();
+      });
+
+      scene.addEventListener('touchmove', (e) => {
+        if (swipeStartY === null || e.touches.length !== 1) return;
+
+        const currentY = e.touches[0].clientY;
+        const deltaY = currentY - swipeStartY;
+        const deltaTime = Date.now() - swipeStartTime;
+
+        if (Math.abs(deltaY) > SWIPE_THRESHOLD && deltaTime < SWIPE_TIME_LIMIT) {
+          const fullscreen = isFullscreen();
+
+          if (fullscreen) {
+            e.preventDefault();
+            exitFullscreen();
+            swipeStartY = null;
+          } else {
+            if (deltaY > 0) {
+              e.preventDefault();
+              enterFullscreen();
+              swipeStartY = null;
+            }
+          }
+        }
+      });
+
+      scene.addEventListener('touchend', (e) => {
+        swipeStartY = null;
+      });
+
+    })();
+  </script>
+</body>
+</html>

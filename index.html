@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>AR with Multiple Markers – One Active Model</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  
+  <script src="js/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ar.js@2.2.2/aframe/build/aframe-ar.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/aframe-extras@6.1.1/dist/aframe-extras.min.js"></script>
+
+  <style>
+    .a-enter-vr { display: none !important; }
+    
+    .control-btn {
+      position: absolute;
+      z-index: 1000;
+      width: 60px;
+      height: 60px;
+      font-size: 32px;
+      background: rgba(0,0,0,0.6);
+      color: white;
+      border: 2px solid white;
+      border-radius: 50%;
+      cursor: pointer;
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: Arial, 'Segoe UI Symbol', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
+      transition: opacity 0.3s;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .control-btn:disabled {
+      opacity: 0.3;
+      pointer-events: none;
+    }
+    #resetBtn {
+      top: 20px;
+      left: 20px;
+      background: rgba(255, 0, 0, 0.6);
+      border-color: white;
+    }
+    #fullscreenBtn {
+      top: 20px;
+      right: 20px;
+    }
+    #rewindBtn {
+      left: 20px;
+      bottom: 30px;
+    }
+    #controlBtn {
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: 30px;
+    }
+    #forwardBtn {
+      right: 20px;
+      bottom: 30px;
+    }
+  </style>
+
+  <script>
+    window.activeModel = null;
+
+    AFRAME.registerComponent('persistent-anchor', {
+      schema: {
+        target: { type: 'string' }
+      },
+      init: function () {
+        this.marker = document.querySelector(this.data.target);
+        this.markerFound = false;
+        this.ignoreActivation = false;
+        this.el.object3D.visible = false;
+        this.animMixer = null;
+        this.pendingStart = false;
+        this.btn = document.getElementById('controlBtn');
+        this.rewindBtn = document.getElementById('rewindBtn');
+        this.forwardBtn = document.getElementById('forwardBtn');
+      },
+      tick: function () {
+        if (!this.marker) return;
+        if (!this.animMixer && this.el.components['animation-mixer']) {
+          this.animMixer = this.el.components['animation-mixer'];
+        }
+        const markerVisible = this.marker.object3D.visible;
+
+        if (window.activeModel && window.activeModel !== this.el) {
+          return;
+        }
+
+        if (markerVisible) {
+          this.el.object3D.position.copy(this.marker.object3D.position);
+          this.el.object3D.quaternion.copy(this.marker.object3D.quaternion);
+
+          if (!this.markerFound) {
+            if (!window.activeModel && !this.ignoreActivation) {
+              window.activeModel = this.el;
+              this.markerFound = true;
+              this.el.object3D.visible = true;
+
+              if (this.btn) {
+                this.btn.disabled = false;
+                this.btn.textContent = '⏸';
+              }
+              if (this.rewindBtn) this.rewindBtn.disabled = false;
+              if (this.forwardBtn) this.forwardBtn.disabled = false;
+
+              // Запуск анимации с начала
+              if (this.animMixer) {
+                if (this.animMixer.mixer) {
+                  this.animMixer.mixer.setTime(0);
+                }
+                this.animMixer.play();
+              } else {
+                this.pendingStart = true;
+              }
+            } else {
+              this.markerFound = false;
+            }
+          }
+        } else {
+          if (this.markerFound) {
+            this.markerFound = false;
+          }
+          if (this.ignoreActivation) {
+            this.ignoreActivation = false;
+          }
+        }
+      },
+      reset: function () {
+        this.markerFound = false;
+        this.el.object3D.visible = false;
+        this.pendingStart = false;
+        if (window.activeModel === this.el) {
+          window.activeModel = null;
+        }
+        if (this.marker && this.marker.object3D.visible) {
+          this.ignoreActivation = true;
+        } else {
+          this.ignoreActivation = false;
+        }
+        if (window.activeModel === null) {
+          if (this.btn) {
+            this.btn.disabled = true;
+            this.btn.textContent = '▶';
+          }
+          if (this.rewindBtn) this.rewindBtn.disabled = true;
+          if (this.forwardBtn) this.forwardBtn.disabled = true;
+        }
+        // Остановка анимации через сохранённый this.animMixer
+        if (this.animMixer) {
+          if (this.animMixer.mixer) {
+            this.animMixer.mixer.setTime(0);
+          }
+          if (typeof this.animMixer.stop === 'function') {
+            this.animMixer.stop();
+          } else if (typeof this.animMixer.pause === 'function') {
+            this.animMixer.pause();
+          }
+        }
+      },
+      startAfterLoad: function () {
+        if (this.pendingStart && this.animMixer && window.activeModel === this.el) {
+          if (this.animMixer.mixer) {
+            this.animMixer.mixer.setTime(0);
+          }
+          this.animMixer.play();
+          this.pendingStart = false;
+        }
+      }
+    });
+  </script>
+</head>
+<body style="margin: 0; overflow: hidden;">
+  <button id="resetBtn" class="control-btn">✕</button>
+  <button id="fullscreenBtn" class="control-btn">⛶</button>
+  <button id="rewindBtn" class="control-btn" disabled>⏪</button>
+  <button id="controlBtn" class="control-btn" disabled>▶</button>
+  <button id="forwardBtn" class="control-btn" disabled>⏩</button>
+
+  <a-scene id="scene" embedded arjs="sourceType: webcam; debugUIEnabled: false;">
+    <!-- Первый маркер и модель -->
+    <a-marker id="ar-marker1" type="pattern" url="markers/my-marker.patt"></a-marker>
+    <a-entity id="model1"
+              persistent-anchor="target: #ar-marker1"
+              gltf-model="url(models/model.glb)"
+              animation-mixer="loop: once; clampWhenFinished: true"
+              scale="0.3 0.3 0.3">
+      <a-text value="Модель 1"
+              font="url(fonts/Roboto-Regular.ttf)"
+              color="gold"
+              align="center"
+              width="5"
+              side="double"
+              position="0 0.8 0"></a-text>
+    </a-entity>
+
+    <!-- Второй маркер и модель -->
+    <a-marker id="ar-marker2" type="pattern" url="markers/my-marker2.patt"></a-marker>
+    <a-entity id="model2"
+              persistent-anchor="target: #ar-marker2"
+              gltf-model="url(models/model1.glb)"
+              animation-mixer="loop: once; clampWhenFinished: true"
+              scale="0.3 0.3 0.3">
+      <a-text value="Модель 2"
+              font="url(fonts/Roboto-Regular.ttf)"
+              color="cyan"
+              align="center"
+              width="5"
+              side="double"
+              position="0 0.8 0"></a-text>
+    </a-entity>
+
+    <!-- Третий маркер и модель -->
+    <a-marker id="ar-marker3" type="pattern" url="markers/my-marker3.patt"></a-marker>
+    <a-entity id="model3"
+              persistent-anchor="target: #ar-marker3"
+              gltf-model="url(models/model2.glb)"
+              animation-mixer="loop: once; clampWhenFinished: true"
+              scale="0.3 0.3 0.3">
+      <a-text value="Модель 3"
+              font="url(fonts/Roboto-Regular.ttf)"
+              color="lime"
+              align="center"
+              width="5"
+              side="double"
+              position="0 0.8 0"></a-text>
+    </a-entity>
+
+    <a-entity camera></a-entity>
+  </a-scene>
+
+  <script>
+    (function() {
+      const btn = document.getElementById('controlBtn');
+      const rewindBtn = document.getElementById('rewindBtn');
+      const forwardBtn = document.getElementById('forwardBtn');
+      const resetBtn = document.getElementById('resetBtn');
+      const model1 = document.getElementById('model1');
+      const model2 = document.getElementById('model2');
+      const model3 = document.getElementById('model3');
+      const scene = document.getElementById('scene');
+      const fullscreenBtn = document.getElementById('fullscreenBtn');
+      const allButtons = document.querySelectorAll('.control-btn');
+
+      // ----- Fullscreen -----
+      function toggleFullscreen() {
+        const elem = document.documentElement;
+        if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.msFullscreenElement) {
+          if (elem.requestFullscreen) elem.requestFullscreen();
+          else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+          else if (elem.msRequestFullscreen) elem.msRequestFullscreen();
+        } else {
+          if (document.exitFullscreen) document.exitFullscreen();
+          else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+          else if (document.msExitFullscreen) document.msExitFullscreen();
+        }
+      }
+      fullscreenBtn.addEventListener('click', toggleFullscreen);
+
+      // ----- Pinch zoom -----
+      let initialDistance = null;
+      let initialScale = null;
+      function getDistance(touches) {
+        const dx = touches[0].clientX - touches[1].clientX;
+        const dy = touches[0].clientY - touches[1].clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+      }
+      scene.addEventListener('touchstart', (e) => {
+        if (!window.activeModel) return;
+        if (e.touches.length === 2) {
+          e.preventDefault();
+          initialDistance = getDistance(e.touches);
+          const scale = window.activeModel.getAttribute('scale');
+          initialScale = scale.x;
+        }
+      });
+      scene.addEventListener('touchmove', (e) => {
+        if (!window.activeModel) return;
+        if (e.touches.length === 2 && initialDistance !== null) {
+          e.preventDefault();
+          const newDistance = getDistance(e.touches);
+          const ratio = newDistance / initialDistance;
+          const newScale = initialScale * ratio;
+          const clampedScale = Math.max(0.1, Math.min(3.0, newScale));
+          window.activeModel.setAttribute('scale', `${clampedScale} ${clampedScale} ${clampedScale}`);
+        }
+      });
+      scene.addEventListener('touchend', (e) => {
+        if (e.touches.length < 2) {
+          initialDistance = null;
+          initialScale = null;
+        }
+      });
+
+      // ----- Управление анимацией -----
+      function setupModelListeners(modelEl) {
+        modelEl.addEventListener('model-loaded', () => {
+          const anim = modelEl.components['animation-mixer'];
+          if (!anim) return;
+          const mixer = anim.mixer;
+          if (!mixer) return;
+          
+          // Принудительно сбрасываем время и ставим на паузу
+          mixer.setTime(0);
+          anim.pause();
+
+          // Сохраняем ссылку на анимацию в компоненте persistent-anchor
+          const persistentComp = modelEl.components['persistent-anchor'];
+          if (persistentComp) {
+            persistentComp.animMixer = anim;
+          }
+
+          mixer.addEventListener('finished', () => {
+            console.log('Анимация завершена для', modelEl.id);
+            if (window.activeModel === modelEl) {
+              btn.textContent = '↻';
+            }
+          });
+
+          // Если модель должна была запуститься до загрузки (pendingStart)
+          if (persistentComp && persistentComp.pendingStart && window.activeModel === modelEl) {
+            mixer.setTime(0);
+            anim.play();
+            persistentComp.pendingStart = false;
+          }
+        });
+      }
+
+      setupModelListeners(model1);
+      setupModelListeners(model2);
+      setupModelListeners(model3);
+
+      // ----- Кнопка play/pause/replay -----
+      btn.addEventListener('click', () => {
+        if (!window.activeModel) return;
+        const anim = window.activeModel.components['animation-mixer'];
+        const mixer = anim ? anim.mixer : null;
+        if (!anim || !mixer) return;
+
+        if (btn.textContent === '⏸') {
+          anim.pause();
+          btn.textContent = '▶';
+        } else if (btn.textContent === '▶') {
+          anim.play();
+          btn.textContent = '⏸';
+        } else if (btn.textContent === '↻') {
+          mixer.timeScale = 1;
+          if (mixer._actions && mixer._actions.length > 0) {
+            const action = mixer._actions[0];
+            action.reset();
+            action.play();
+          } else {
+            mixer.setTime(0);
+            anim.play();
+          }
+          btn.textContent = '⏸';
+        }
+      });
+
+      // ----- Кнопки перемотки (ускорение) -----
+      function setSpeed(speed) {
+        if (!window.activeModel) return;
+        const anim = window.activeModel.components['animation-mixer'];
+        if (!anim) return;
+        const mixer = anim.mixer;
+        if (!mixer) return;
+        mixer.timeScale = speed;
+      }
+
+      forwardBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        setSpeed(2);
+      });
+      forwardBtn.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        setSpeed(1);
+      });
+      forwardBtn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        setSpeed(2);
+      });
+      forwardBtn.addEventListener('mouseup', (e) => {
+        e.preventDefault();
+        setSpeed(1);
+      });
+      forwardBtn.addEventListener('mouseleave', () => {
+        setSpeed(1);
+      });
+
+      rewindBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        setSpeed(-2);
+      });
+      rewindBtn.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        setSpeed(1);
+      });
+      rewindBtn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        setSpeed(-2);
+      });
+      rewindBtn.addEventListener('mouseup', (e) => {
+        e.preventDefault();
+        setSpeed(1);
+      });
+      rewindBtn.addEventListener('mouseleave', () => {
+        setSpeed(1);
+      });
+
+      window.addEventListener('blur', () => {
+        setSpeed(1);
+      });
+
+      // ----- Сброс (крестик) -----
+      resetBtn.addEventListener('click', () => {
+        [model1, model2, model3].forEach(el => {
+          const comp = el.components['persistent-anchor'];
+          if (comp) comp.reset();
+        });
+        console.log('Приложение сброшено');
+      });
+
+      // ----- Скрытие/показ интерфейса двойным нажатием -----
+      let tapCount = 0;
+      let tapTimer = null;
+      const HIDE_DELAY = 500;
+
+      function resetTapCount() {
+        tapCount = 0;
+        if (tapTimer) {
+          clearTimeout(tapTimer);
+          tapTimer = null;
+        }
+      }
+
+      function toggleInterface() {
+        const anyVisible = allButtons[0]?.style.display !== 'none';
+        const newDisplay = anyVisible ? 'none' : 'flex';
+        allButtons.forEach(btn => btn.style.display = newDisplay);
+      }
+
+      scene.addEventListener('touchstart', (e) => {
+        if (e.touches.length > 1) {
+          resetTapCount();
+          return;
+        }
+
+        tapCount++;
+        if (tapTimer) clearTimeout(tapTimer);
+        tapTimer = setTimeout(resetTapCount, HIDE_DELAY);
+
+        if (tapCount === 2) {
+          e.preventDefault();
+          tapCount = 0;
+          clearTimeout(tapTimer);
+          tapTimer = null;
+          toggleInterface();
+        }
+      }, { passive: false });
+
+      // ----- Swipe gestures for fullscreen -----
+      let swipeStartY = null;
+      let swipeStartTime = null;
+      const SWIPE_THRESHOLD = 50;
+      const SWIPE_TIME_LIMIT = 500;
+
+      function isFullscreen() {
+        return !!(document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement);
+      }
+
+      function enterFullscreen() {
+        const elem = document.documentElement;
+        if (elem.requestFullscreen) elem.requestFullscreen();
+        else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+        else if (elem.msRequestFullscreen) elem.msRequestFullscreen();
+      }
+
+      function exitFullscreen() {
+        if (document.exitFullscreen) document.exitFullscreen();
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        else if (document.msExitFullscreen) document.msExitFullscreen();
+      }
+
+      scene.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1) {
+          swipeStartY = null;
+          return;
+        }
+        swipeStartY = e.touches[0].clientY;
+        swipeStartTime = Date.now();
+      });
+
+      scene.addEventListener('touchmove', (e) => {
+        if (swipeStartY === null || e.touches.length !== 1) return;
+
+        const currentY = e.touches[0].clientY;
+        const deltaY = currentY - swipeStartY;
+        const deltaTime = Date.now() - swipeStartTime;
+
+        if (Math.abs(deltaY) > SWIPE_THRESHOLD && deltaTime < SWIPE_TIME_LIMIT) {
+          const fullscreen = isFullscreen();
+
+          if (fullscreen) {
+            e.preventDefault();
+            exitFullscreen();
+            swipeStartY = null;
+          } else {
+            if (deltaY > 0) {
+              e.preventDefault();
+              enterFullscreen();
+              swipeStartY = null;
+            }
+          }
+        }
+      });
+
+      scene.addEventListener('touchend', (e) => {
+        swipeStartY = null;
+      });
+
+    })();
+  </script>
+</body>
+</html>
